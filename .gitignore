@@ -1,2 +1,5 @@
 .DS_Store
 build
+*.wav
+*.sf2
+*.SF2

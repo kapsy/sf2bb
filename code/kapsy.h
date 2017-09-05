@@ -113,7 +113,7 @@ typedef uintptr_t uintptr;
 
 // NOTE: (Kapsy) Platform level types
 
-#if VARIATIONS_SLOW
+#if 1 
 // TODO: (Kapsy) abort() is part of stdlib - see if we can create an alternative
 // and remove this dependency.
 #define Assert(Expression) if(!(Expression)) {abort();}

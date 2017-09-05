@@ -13,7 +13,7 @@ OSX_DEPENDENCIES="-framework Cocoa -framework IOKit -framework CoreAudio -framew
 clang -g $DEBUG_SWITCHES -Wall $IGNORE_WARNING_FLAGS -lstdc++ -DINTERNAL $CODE_PATH/midi2note.cc -o $BUILD_PATH/midi2note
 $BUILD_PATH/midi2note
 
-# clang -g $DEBUG_SWITCHES -Wall $IGNORE_WARNING_FLAGS -lstdc++ -DINTERNAL $CODE_PATH/sf2bb.cc -o $BUILD_PATH/sf2bb
+clang -g $DEBUG_SWITCHES -Wall $IGNORE_WARNING_FLAGS -lstdc++ -DINTERNAL $CODE_PATH/sf2bb.cc -o $BUILD_PATH/sf2bb
 # clang++ -S -mllvm --x86-asm-syntax=intel $CODE_PATH/sf2bb.cc -o $(BUILD_PATH)/sf2bb
 
 exit 0

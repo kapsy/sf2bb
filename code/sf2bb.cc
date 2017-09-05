@@ -8,8 +8,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 enum
 {
-    sf2bbArg_Input,
     sf2bbArg_BPM,
+    sf2bbArg_Input,
     sf2bbArg_Divisions,
     sf2bbArg_DivisionsStart,
     sf2bbArg_MonoLeft,
@@ -29,12 +29,12 @@ char *ArgDefs[] =
 };
 static int ArgDefsCount;
 
-#define MAX_ARG_INFO_VALUES 16
+#define MAX_COLLATED_ARG_VALUES 16
 
 struct collated_arg
 {
-    int DefIndex;
-    char *Values[MAX_ARG_INFO_VALUES];
+    int Found;
+    char *Values[MAX_COLLATED_ARG_VALUES];
     int ValueCount;
 };
 
@@ -50,26 +50,29 @@ static void
 kapsy_PrintCollatedArgs(collated_args *Args)
 {
     for(int ArgIndex = 0;
-            ArgIndex < Args->Count;
+            ArgIndex < ArrayCount(Args->Args);
             ++ArgIndex)
     {
         collated_arg *Arg = Args->Args + ArgIndex;
-        printf("ArgIndex: %d\n", ArgIndex);
-        printf("DefIndex: %d\n", Arg->DefIndex);
-        for(int ValueIndex = 0;
-                ValueIndex < Arg->ValueCount;
-                ++ValueIndex)
+        if(Arg->Found)
         {
-            printf("Value: %s\n", Arg->Values[ValueIndex]);
+            printf("ArgIndex: %d\n", ArgIndex);
+            for(int ValueIndex = 0;
+                    ValueIndex < Arg->ValueCount;
+                    ++ValueIndex)
+            {
+                printf("Value: %s\n", Arg->Values[ValueIndex]);
+            }
+            printf("\n");
         }
-        printf("\n");
     }
 }
 
-collated_args
-kapsy_GetCollatedArgs(int ArgCount, char **Args, char **Defs, int DefsCount)
+internal void
+kapsy_GetCollatedArgs(int ArgCount, char **Args,
+        char **Defs, int DefsCount,
+        collated_args *Result)
 {
-    collated_args Result = {};
     collated_arg *CurrentArg = 0;
 
     for(int ArgIndex = 1;
@@ -77,7 +80,7 @@ kapsy_GetCollatedArgs(int ArgCount, char **Args, char **Defs, int DefsCount)
             ++ArgIndex)
     {
         char *ArgRaw = *(Args + ArgIndex);
-        int DefFound = 0;
+        int ArgIsDef = 0;
 
         for(int DefIndex = 0;
                 DefIndex < DefsCount;
@@ -86,45 +89,171 @@ kapsy_GetCollatedArgs(int ArgCount, char **Args, char **Defs, int DefsCount)
             char *Def = *(Defs + DefIndex);
             if(kapsy_StringComp(Def, ArgRaw))
             {
-                CurrentArg = Result.Args + Result.Count++;
-                CurrentArg->DefIndex = DefIndex;
-                DefFound = 1;
+                CurrentArg = Result->Args + DefIndex;
+                CurrentArg->Found = 1;
+                ArgIsDef = 1;
                 break;
             }
         }
 
-        if(!DefFound && CurrentArg)
+        if(!ArgIsDef && CurrentArg)
         {
             char **CurrentArgValue = (CurrentArg->Values + CurrentArg->ValueCount++);
             *CurrentArgValue = ArgRaw;
         }
     }
 
-    return(Result);
-
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// WAV Specs //////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO: (KAPSY) Let's move all this to kapsy.io
+struct read_file_result
+{
+    u32 ContentsSize;
+    void *Contents;
+};
+
+internal read_file_result
+ReadEntireFile2(char *Filename)
+{
+    read_file_result Result = {};
+
+    FILE *File = fopen(Filename, "r");
+
+    if(File)
+    {
+        fseek(File, 0, SEEK_END);
+        u32 ContentsSize = ftell(File);
+        fseek(File, 0, SEEK_SET);
+
+        Result.Contents = (void *)malloc(ContentsSize);
+        Result.ContentsSize = ContentsSize;
+        u64 ReadBytes = fread(Result.Contents, Result.ContentsSize, 1, File);
+
+        // Assert(ReadBytes == Result.ContentsSize);
+    }
+
+    return(Result);
+}
+
+#define HI_NIBBLE 0xF0
+#define LO_NIBBLE 0x0F
+#define WAV_FMT_CHUNK_ID 0x666D7420
+#define WAV_DATA_CHUNK_ID 0x64617461
+
+#pragma pack(push, 1)
+struct wav_sub_chunk
+{
+    u32 ID; // Big
+    u32 Size;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct wav_header
+{
+    // NOTE: (Kapsy) All x86 CPUs are Little Endian!
+    u32 ChunkID; // Big
+    u32 ChunkSize;
+    u32 Format; // Big
+
+    // u32 SubChunk1ID; // Big
+    // u32 SubChunk1Size;
+    // u16 AudioFormat;
+    // u16 NumChannels;
+    // u32 SampleRate;
+    // u32 ByteRate;
+    // u16 BlockAlign;
+    // u16 BitsPerSample;
+    // u32 SubChunk2ID; // Big
+    // u32 SubChunk2Size;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct wav_out_header
+{
+    // NOTE: (Kapsy) All x86 CPUs are Little Endian!
+    u32 ChunkID; // Big
+    u32 ChunkSize;
+    u32 Format; // Big
+
+    u32 SubChunk1ID; // Big
+    u32 SubChunk1Size;
+    u16 AudioFormat;
+    u16 NumChannels;
+    u32 SampleRate;
+    u32 ByteRate;
+    u16 BlockAlign;
+    u16 BitsPerSample;
+    u32 SubChunk2ID; // Big
+    u32 SubChunk2Size;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct wav_fmt
+{
+    u16 AudioFormat;
+    u16 NumChannels;
+    u32 SampleRate;
+    u32 ByteRate;
+    u16 BlockAlign;
+    u16 BitsPerSample;
+    u32 SubChunk2ID; // Big
+    u32 SubChunk2Size;
+};
+#pragma pack(pop)
 
 ///////////////////////////////////////////////////////////////////////////////
 // SF2 Spec Structs ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
 // NOTE: (KAPSY) Four Character Code
+typedef short SHORT;
+typedef unsigned short WORD;
+typedef unsigned int DWORD;
+typedef unsigned char BYTE;
+typedef char CHAR;
 typedef DWORD FOURCC;
 
-struct sub_chunk
+typedef WORD SFModulator;
+typedef WORD SFGenerator;
+typedef WORD SFTransform;
+
+#define MAX_CHILDREN_CHUNKS (1 << 4)
+#define MAX_CHUNK_POOL_CHUNKS (1 << 11)
+
+
+struct chunk
 {
     FOURCC ckID;
     DWORD ckSize;
     BYTE *ckDATA;
+
+    u32 IsList;
+
+    chunk *Children;
+    u32 ChildrenCount;
 };
 
+global_variable chunk ChunkPool[MAX_CHUNK_POOL_CHUNKS];
+global_variable u32 ChunkPoolPosition;
+
+#if 0
 struct chunk
 {
     FOURCC ckHeader;
     FOURCC ckID;
     DWORD ckSize;
 };
+#endif
 
+
+#pragma pack(push, 1)
 struct sfVersionTag
 {
     WORD wMajor;
@@ -157,11 +286,6 @@ struct sfModList
     SFTransform sfModTransOper;
 };
 
-typedef short SHORT;
-typedef unsigned short WORD;
-typedef unsigned int DWORD;
-typedef unsigned char BYTE;
-
 struct rangesType
 {
     BYTE byLo;
@@ -174,10 +298,6 @@ union genAmountType
     SHORT shAmount;
     WORD wAmount;
 };
-
-// TODO: (KAPSY) Should just make these enums.
-typedef WORD SFGenerator;
-typedef WORD SFModulator;
 
 struct sfGenList
 {
@@ -204,7 +324,7 @@ struct sfInstGenList
     genAmountType genAmount;
 };
 
-enum SFSampleLink
+enum
 {
     monoSample = 1,
     rightSample = 2,
@@ -215,6 +335,8 @@ enum SFSampleLink
     RomLeftSample = 0x8004,
     RomLinkedSample = 0x8008
 };
+
+typedef WORD SFSampleLink;
 
 struct sfSample
 {
@@ -229,7 +351,12 @@ struct sfSample
     WORD wSampleLink;
     SFSampleLink sfSampleType;
 };
+#pragma pack(pop)
 
+
+// 2017年 9月 5日 火曜日 22時38分14秒 JST
+// SO, I'm pretty sure the reason we aren't working is that we haven't created
+// the universal inst zone. We only have one.
 
 
 enum
@@ -250,6 +377,7 @@ enum
     modLfoToVolume = 13,
     chorusEffectsSend = 15,
     reverbEffectsSend = 16,
+    pan = 17,
     delayModLFO = 21,
     freqModLFO = 22,
     delayVibLFO = 23,
@@ -270,6 +398,8 @@ enum
     releaseVolEnv = 38,
     keynumToVolEnvHold = 39,
     keynumToVolEnvDecay = 40,
+    instrument = 41,
+    reserved1 = 42,
     keyRange = 43,
     velRange = 44,
     startloopAddrsCoarseOffset = 45,
@@ -290,6 +420,15 @@ enum
 // Internal SF2 Defs //////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
+#define MAX_PRESETS 16
+#define MAX_PRESET_MODULATORS 16
+#define MAX_PRESET_GENERATORS 16
+#define MAX_INSTRUMENTS 16
+#define MAX_INST_BAGS 128
+#define MAX_INST_MODULATORS 1024
+#define MAX_INST_GENERATORS 1024
+#define MAX_SAMPLES 32
+
 struct sf_sample_params
 {
     char *Path;
@@ -297,11 +436,17 @@ struct sf_sample_params
 
 struct sf_inst_params
 {
+    char *Name;
 };
 
+struct sf_preset_params
+{
+    char *Name;
+};
 
 struct sf_zone_params
 {
+    int InstrumentIndex;
     int SampleIndex;
     int SampleStart;
     int SampleEnd;
@@ -312,217 +457,433 @@ struct sf_zone_params
 // NOTE: (KAPSY) All Create() functions are directly translated to the
 // appropriate SF2 structs for file writing. For a more complete editor we
 // would store everything in an editable state.
-struct sf_pre_state
+struct sf_prestate
 {
-    // TODO: (Kapsy) Probably don't need these arrays if we're already storing
-    // everything in the format most appropriate to writing out.
-    // sf2_sample Samples[MAX_SAMPLES];
-    // int SampleCount;
-    // sf2_inst Instruments[SF2_MAX_INSTRUMENTS];
-    // int InstrumentCount;
-    // sf2_zone Zones[SF2_MAX_ZONES];
-    // int ZoneCount;
+    u32 SampleDataCount;
 
-    // TODO: (Kapsy) Need to add the following lists of data for SF2 files: (all lists)
-    sfPresetHeader PresetHeaders[MAX_PRESETS];
-    int PresetHeaderCount;
+    BYTE *SampleData16;
+    BYTE *SampleData24;
+
+    // TODO: (Kapsy) Need to add the following lists of data for SF2 files:
+    // (all lists)
+    sfPresetHeader Presets[MAX_PRESETS];
+    int PresetCount;
 
     sfPresetBag PresetBags[MAX_PRESETS];
     int PresetBagCount;
 
-    sfModList PresetModulators[MAX_PRESETS];
+    sfModList PresetModulators[MAX_PRESET_MODULATORS];
     int PresetModulatorCount;
 
-    sfGenList PresetGenerators[MAX_PRESETS];
+    sfGenList PresetGenerators[MAX_PRESET_GENERATORS];
     int PresetGeneratorCount;
 
     sfInst Instruments[MAX_INSTRUMENTS];
     int InstrumentCount;
 
-    sfInstBag InstrumentBags[MAX_INSTRUMENTS];
+    sfInstBag InstrumentBags[MAX_INST_BAGS];
     int InstrumentBagCount;
 
-    sfModList InstrumentModulators[MAX_ZONE_MODULATORS];
+    sfModList InstrumentModulators[MAX_INST_MODULATORS];
     int InstrumentModulatorCount;
 
-    sfInstGenList InstrumentGenerators[MAX_ZONE_GENERATORS];
+    sfInstGenList InstrumentGenerators[MAX_INST_GENERATORS];
     int InstrumentGeneratorCount;
 
     sfSample Samples[MAX_SAMPLES];
     int SampleCount;
-;
+};
 
 internal int
-CreateSample(sf_pre_state *PreState, char *Path)
+CreateTestSample(sf_prestate *Prestate)
 {
-    Assert(PreState->SampleCount < ArrayCount(PreState->Samples));
+    int BytesPerSample24 = 1;
+    int BytesPerSample16 = 2;
 
-    int Index = PreState->SampleCount++;
-    sfSample *Sample = PreState->Samples + Index;
+    u32 PaddingCount = 46;
+    u32 FrameCount = 2;
+    u32 FrameCountPadded = FrameCount + PaddingCount;
 
-    // TODO: (KAPSY) Do we load the sample directly here? Would seem to make
-    // sense, but might be better to just refer to the file and load when
-    // called upon?
-    //
-    u32 SampleCount = ;
+    // BYTE *SampleOut24 =
+        // (Prestate->SampleData24 + Prestate->SampleDataCount*BytesPerSample24);
 
-    u32 SampleStart = PreState->SampleDataCount;
-    u32 SampleEnd = SampleStart + SampleCount;
-    PreState->SampleDataCount = SampleEnd;
-
-    // TODO: (KAPSY) Not sure if this is the way to go - do we have to create a
-    // new "sample" for each chop? Or, is that the role of a zone?
-    Sample->achSampleName[20] = 0;
-    sprintf(Sample->achSampleName[20]...);
-    Sample->dwStart = SampleStart; // Offset from the sample data start.
-    Sample->dwEnd = SampleEnd;
-    Sample->dwStartloop = 0;
-    Sample->dwEndloop = 0;
-    Sample->dwSampleRate = SampleRate;
-    Sample->byOriginalPitch = 255;
-    Sample->chPitchCorrection = 0;
-    Sample->wSampleLink = ; // TODO: (KAPSY) Index for the sample of the other channel - interleaved not supported!
-    Sample->sfSampleType = leftSample;
-
-    return(Index);
-}
-
-internal int
-CreateInst(sf_pre_state *PreState, sf_inst_params Params)
-{
-    Assert(PreState->InstrumentCount < ArrayCount(PreState->Instruments));
-    int Index = PreState->InstrumentCount++;
-    sfInst *Inst = PreState->Instruments + Index;
-
-    Assert(StringLength(Params->Name) < ArrayLength(Inst->achInstName));
-    sprintf(&Inst->achInstName, Params->Name);
-
-    // NOTE: (KAPSY) Index to the instruments zone list.
-    Inst->wInstBagNdx = PreState->InstrumentBagCount;
-
-
-#if 0
-    for(int ZoneIndex = 0;
-            ZoneIndex < Params.ZoneCount;
-            ++ZoneIndex)
+    BYTE *NewSampleData16 = (BYTE *)realloc(Prestate->SampleData16,
+            Prestate->SampleDataCount + FrameCountPadded*BytesPerSample16);
+    if(NewSampleData16)
     {
-        sf_zone_params *ZoneParams = InstParams + ZoneIndex;
-
-        Assert(PreState->InstrumentBagCount < ArrayCount(PreState->InstrumentBags));
-        sfInstBag *InstBag = PreState->InstrumentBags + PreState->InstrumentBagCount++;
-
-        // TODO: (KAPSY) Set up the 
-
-
+        Prestate->SampleData16 = NewSampleData16;
     }
-#endif
+    else
+    {
+        Assert(!"Unable to allocate sample memory, aborting.\n");
+    }
 
 
+    BYTE *SampleOut16 =
+        (Prestate->SampleData16 + Prestate->SampleDataCount*BytesPerSample16);
+
+    /* *SampleOut24++ = 0xFF;
+    *SampleOut24++ = 0x0; */
+
+    *SampleOut16++ = 0x0;
+    *SampleOut16++ = 0x0;
+
+    *SampleOut16++ = 0xFF;
+    *SampleOut16++ = 0xFF;
+
+    for(u32 PaddingIndex = 0;
+            PaddingIndex < PaddingCount;
+            ++PaddingIndex)
+    {
+        *SampleOut16++ = 0x0;
+    }
 
 
+    int IndexLeft = Prestate->SampleCount++;
+    sfSample *SampleLeft = Prestate->Samples + IndexLeft;
 
+    sprintf(SampleLeft->achSampleName, "%s", "sf2_test_wav");
+    SampleLeft->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
+    SampleLeft->dwEnd = Prestate->SampleDataCount + FrameCount;
+    SampleLeft->dwStartloop = 0;
+    SampleLeft->dwEndloop = 0;
+    SampleLeft->dwSampleRate = 44100;
+    SampleLeft->byOriginalPitch = 41;
+    SampleLeft->chPitchCorrection = 0;
+    SampleLeft->wSampleLink = 0;
+    SampleLeft->sfSampleType = monoSample;
 
-    return(Index);
+    Prestate->SampleDataCount+=FrameCountPadded;
+    return(IndexLeft);
 }
 
-internal
-CreateInstGenerator(sf_prestate *PreState, int GenOper, int GenAmount)
+internal int
+CreateSample(sf_prestate *Prestate, char *Path)
 {
-    Assert((PreState->InstrumentGeneratorCount + GeneratorsPerZone) <
-            ArrayCount(PreState->InstrumentGenerators));
+    read_file_result WavFileResult = ReadEntireFile2(Path);
 
-    sfInstGenList *Generator = PreState->InstrumentGenerators +
-        PreState->InstrumentGeneratorsCount++;
+    Assert(WavFileResult.ContentsSize != 0);
+
+    u8 *ReadPosition = (u8 *)WavFileResult.Contents;
+    u8 *FileEnd = ReadPosition + WavFileResult.ContentsSize;
+
+    wav_header *WavHeader = (wav_header *)WavFileResult.Contents;
+    ReadPosition+= sizeof(*WavHeader);
+
+    wav_fmt *Format = 0;
+    wav_sub_chunk *DataChunk = 0;
+
+    while(ReadPosition < FileEnd)
+    {
+        wav_sub_chunk *SubChunk = (wav_sub_chunk *)ReadPosition;
+        switch(ReverseEndianDWord(SubChunk->ID))
+        {
+            case WAV_FMT_CHUNK_ID:
+                {
+                    Format = (wav_fmt *)(ReadPosition + sizeof(*SubChunk));
+                } break;
+            case WAV_DATA_CHUNK_ID:
+                {
+                    DataChunk = (wav_sub_chunk *)ReadPosition;
+                } break;
+        }
+        ReadPosition+=(sizeof(*SubChunk) + SubChunk->Size);
+    }
+
+    Assert(Format);
+    Assert(DataChunk);
+    // TODO: (KAPSY) Up to here should be a common function in kapsy.h
+
+    u32 PaddingCount = 46;
+    // NOTE: (Kapsy) Format->BlockAlign is 6 for stereo 24 bit sample.
+    u32 FrameCount = (DataChunk->Size/Format->BlockAlign);
+    u32 FrameCountPadded = FrameCount + PaddingCount;
+    u32 SampleCountPadded = FrameCountPadded*Format->NumChannels;
+
+    Assert((Format->NumChannels == 1) || (Format->NumChannels == 2));
+
+    int BytesPerSample24 = 1;
+    int BytesPerSample16 = 2;
+
+    BYTE *NewSampleData24 = (BYTE *)realloc(Prestate->SampleData24,
+            Prestate->SampleDataCount + SampleCountPadded*BytesPerSample24);
+    if(NewSampleData24)
+    {
+        Prestate->SampleData24 = NewSampleData24;
+    }
+    else
+    {
+        fprintf(stderr, "Unable to allocate sample memory, aborting.\n");
+        return(-1);
+    }
+
+    BYTE *NewSampleData16 = (BYTE *)realloc(Prestate->SampleData16,
+            Prestate->SampleDataCount + SampleCountPadded*BytesPerSample16);
+    if(NewSampleData16)
+    {
+        Prestate->SampleData16 = NewSampleData16;
+    }
+    else
+    {
+        fprintf(stderr, "Unable to allocate sample memory, aborting.\n");
+        return(-1);
+    }
+
+    BYTE *SampleIn = (BYTE *)(DataChunk + 1);
+    BYTE *SampleOut24 =
+        (Prestate->SampleData24 + Prestate->SampleDataCount*BytesPerSample24);
+    BYTE *SampleOut16 =
+        (Prestate->SampleData16 + Prestate->SampleDataCount*BytesPerSample16);
+
+    for(u32 FrameIndex = 0;
+            FrameIndex < FrameCount;
+            ++FrameIndex)
+    {
+        *SampleOut24++ = *SampleIn++;
+        *SampleOut16++ = *SampleIn++;
+        *SampleOut16++ = *SampleIn++;
+
+        // TODO: (KASPY) Mono file support.
+        *SampleOut24++ = *SampleIn++;
+        *SampleOut16++ = *SampleIn++;
+        *SampleOut16++ = *SampleIn++;
+    }
+
+    int IndexLeft = Prestate->SampleCount++;
+    sfSample *SampleLeft = Prestate->Samples + IndexLeft;
+
+    int IndexRight = Prestate->SampleCount++;
+    sfSample *SampleRight = Prestate->Samples + IndexRight;
+
+    sprintf(SampleLeft->achSampleName, "%s", "TestSample");
+    SampleLeft->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
+    SampleLeft->dwEnd = Prestate->SampleDataCount + FrameCount;
+    SampleLeft->dwStartloop = 0;
+    SampleLeft->dwEndloop = 0;
+    SampleLeft->dwSampleRate = Format->SampleRate;
+    SampleLeft->byOriginalPitch = 255;
+    SampleLeft->chPitchCorrection = 0;
+    // NOTE: (KAPSY) Index for the sample of the other channel -
+    // interleaved not supported!
+    SampleLeft->wSampleLink = IndexRight;
+    SampleLeft->sfSampleType = leftSample;
+    Prestate->SampleDataCount+=FrameCountPadded;
+
+
+    sprintf(SampleRight->achSampleName, "%s", "TestSample");
+    SampleRight->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
+    SampleRight->dwEnd = Prestate->SampleDataCount + FrameCount;
+    SampleRight->dwStartloop = 0;
+    SampleRight->dwEndloop = 0;
+    SampleRight->dwSampleRate = Format->SampleRate;
+    SampleRight->byOriginalPitch = 255;
+    SampleRight->chPitchCorrection = 0;
+    SampleRight->wSampleLink = 0;
+    SampleRight->sfSampleType = rightSample;
+    Prestate->SampleDataCount+=FrameCountPadded;
+
+    return(IndexLeft);
+}
+
+internal void
+CreateInstGenerator(sf_prestate *Prestate, int GenOper, genAmountType GenAmount)
+{
+    sfInstGenList *Generator = Prestate->InstrumentGenerators +
+        Prestate->InstrumentGeneratorCount++;
 
     Generator->sfGenOper = GenOper;
     Generator->genAmount = GenAmount;
 }
 
-// TODO: (KAPSY) Are we even able to provide an index here?
-internal int
-CreateZone(sf_pre_state *PreState, sf_zone_params Params)
+internal void
+CreatePresetGenerator(sf_prestate *Prestate, int GenOper, genAmountType GenAmount)
 {
-    int InstrumentIndex = Params.InstrumentIndex;
-    sfInst *Inst = PreState->Instruments + InstrumentIndex;
+    sfGenList *Generator = Prestate->PresetGenerators +
+        Prestate->PresetGeneratorCount++;
 
-    // TODO: (KAPSY) So these are zones, and we have to create at least as many as we have hits for.
-    Assert(PreState->InstrumentBagCount < ArrayCount(PreState->InstrumentBags));
-    sfInstBag *InstBag = PreState->InstrumentBags + PreState->InstrumentBagCount++;
-
-    InstBag->wInstGenNdx = PreState->InstrumentGeneratorCount;
-    InstBag->wInstModNdx = PreState->InstrumentModulatorCount;
-
-    CreateInstGenerator(PreState, startAddrsOffset, Params.SampleStart);
-    CreateInstGenerator(PreState, endAddrsOffset, Params.SampleEnd);
-
-    CreateInstGenerator(PreState, delayVolEnv, Params.);
-    CreateInstGenerator(PreState, attackVolEnv, Params.);
-    CreateInstGenerator(PreState, holdVolEnv, Params.);
-    CreateInstGenerator(PreState, decayVolEnv, Params.);
-    CreateInstGenerator(PreState, sustainVolEnv, Params.);
-    CreateInstGenerator(PreState, releaseVolEnv, Params.);
-
-    CreateInstGenerator(PreState, keyRange, Params.Key);
-    CreateInstGenerator(PreState, velRange, ??);
-
-    CreateInstGenerator(PreState, sampleID, SampleIndex);
-    CreateInstGenerator(PreState, overridingRootKey, Params.Key);
-
-    CreateInstGenerator(PreState, courseTune, Params.TuningOffset);
-    CreateInstGenerator(PreState, fineTune, Params.TuningOffset);
-
-
-
-    return(Result);
+    Generator->sfGenOper = GenOper;
+    Generator->genAmount = GenAmount;
 }
 
-internal
-CreateTerminals(sf_pre_state *PreState)
+internal int
+CreateInst(sf_prestate *Prestate, sf_inst_params Params)
 {
-    Assert(PreState->PresetHeaderCount < ArrayCount(PreState->PresetHeaders));
-    sfPresetHeader *PresetHeader =
-        PreState->PresetHeaders + PreState->PresetHeaderCount++;
-    ZeroStruct(*PresetHeader);
+    Assert(Prestate->InstrumentCount < ArrayCount(Prestate->Instruments));
+    int Index = Prestate->InstrumentCount++;
+    sfInst *Inst = Prestate->Instruments + Index;
 
-    Assert(PreState->PresetBagCount < ArrayCount(PreState->PresetBags));
+    Assert(StringLength(Params.Name) < ArrayCount(Inst->achInstName));
+    sprintf(Inst->achInstName, "%s", Params.Name);
+
+    // NOTE: (KAPSY) Index to the instruments zone list.
+    Inst->wInstBagNdx = Prestate->InstrumentBagCount;
+
+    return(Index);
+}
+
+internal int
+CreatePreset(sf_prestate *Prestate, sf_preset_params Params)
+{
+    Assert(Prestate->PresetCount < ArrayCount(Prestate->Presets));
+
+    int Index = Prestate->PresetCount++;
+    sfPresetHeader *Preset = Prestate->Presets + Index;
+
+    Assert(StringLength(Params.Name) < ArrayCount(Preset->achPresetName));
+    sprintf(Preset->achPresetName, "%s", Params.Name);
+
+    // NOTE: (KAPSY) Index to the instruments zone list.
+    // Preset->wPresetBagNdx = Prestate->PresetrumentBagCount;
+    //
+    //
+    //
+
+    Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
     sfPresetBag *PresetBag =
-        PreState->PresetBags + PreState->PresetBagCount++;
+        Prestate->PresetBags + Prestate->PresetBagCount++;
     ZeroStruct(*PresetBag);
 
-    Assert(PreState->PresetModulatorCount < ArrayCount(PreState->PresetModulators));
+    Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
+    sfPresetBag *PresetBag2 =
+        Prestate->PresetBags + Prestate->PresetBagCount++;
+    ZeroStruct(*PresetBag2);
+
+
+    genAmountType Ranges = { .ranges = { 0, 0x7f } };
+    CreatePresetGenerator(Prestate, keyRange, Ranges);
+
+    genAmountType InstrumentIndex = { .wAmount = 0 };
+    CreatePresetGenerator(Prestate, instrument, InstrumentIndex);
+
+    return(Index);
+}
+
+internal int
+CreateGlobalZone(sf_prestate *Prestate)
+{
+    int InstBagCount = Prestate->InstrumentBagCount++;
+    Assert(InstBagCount < ArrayCount(Prestate->InstrumentBags));
+    sfInstBag *InstBag = Prestate->InstrumentBags + InstBagCount;
+
+    InstBag->wInstGenNdx = Prestate->InstrumentGeneratorCount;
+    InstBag->wInstModNdx = Prestate->InstrumentModulatorCount;
+
+    genAmountType KeyRange = { .ranges = { 0, 0x7f } };
+    CreateInstGenerator(Prestate, keyRange, KeyRange);
+
+    genAmountType VelRange = { .ranges = { 0, 0x7f } };
+    CreateInstGenerator(Prestate, velRange, VelRange);
+
+    return(InstBagCount);
+}
+
+// TODO: (KAPSY) Are we even able to provide an index here?
+// Should be renamed to CreateInstZone
+internal int
+CreateZone(sf_prestate *Prestate, sf_zone_params Params)
+{
+    int InstrumentIndex = Params.InstrumentIndex;
+    sfInst *Inst = Prestate->Instruments + InstrumentIndex;
+
+    // TODO: (KAPSY) So these are zones, and we have to create at least as many
+    // as we have hits for.
+    int InstBagCount = Prestate->InstrumentBagCount++;
+    Assert(InstBagCount < ArrayCount(Prestate->InstrumentBags));
+    sfInstBag *InstBag = Prestate->InstrumentBags + InstBagCount;
+
+    InstBag->wInstGenNdx = Prestate->InstrumentGeneratorCount;
+    InstBag->wInstModNdx = Prestate->InstrumentModulatorCount;
+
+    // CreateInstGenerator(Prestate, startAddrsOffset, Params.SampleStart);
+    // CreateInstGenerator(Prestate, endAddrsOffset, Params.SampleEnd);
+
+    // TODO: (KAPSY) Proper conversion functions for these times.
+    // CreateInstGenerator(Prestate, delayVolEnv, -32768);
+    // CreateInstGenerator(Prestate, attackVolEnv, -32768);
+    // CreateInstGenerator(Prestate, holdVolEnv, -32768);
+    // CreateInstGenerator(Prestate, decayVolEnv, -7973);
+    // CreateInstGenerator(Prestate, sustainVolEnv, 0);
+    // CreateInstGenerator(Prestate, releaseVolEnv, -7973);
+
+    // genAmountType KeyRange = { .ranges = { 0, 0x7f } };
+    // CreateInstGenerator(Prestate, keyRange, KeyRange);
+
+    // genAmountType VelRange = { .ranges = { 0, 0x7f } };
+    // CreateInstGenerator(Prestate, velRange, VelRange);
+
+    genAmountType Pan = { .wAmount = 0 };
+    CreateInstGenerator(Prestate, pan, Pan);
+
+    genAmountType SampleIndex = { .wAmount = 0 };
+    CreateInstGenerator(Prestate, sampleID, SampleIndex);
+
+    // CreateInstGenerator(Prestate, overridingRootKey, Params.Key);
+
+    // CreateInstGenerator(Prestate, coarseTune, Params.TuningOffset);
+    //CreateInstGenerator(Prestate, fineTune, Params.TuningOffset);
+
+    return(InstBagCount);
+}
+
+internal void
+CreateTerminals(sf_prestate *Prestate)
+{
+    Assert(Prestate->PresetCount < ArrayCount(Prestate->Presets));
+    sfPresetHeader *Preset =
+        Prestate->Presets + Prestate->PresetCount++;
+    ZeroStruct(*Preset);
+    sprintf(Preset->achPresetName, "%s", "EOP");
+    // Preset->wPreset = 0xbfdb;
+    // Preset->wBank = 0xff5f;
+    Preset->wPresetBagNdx = Prestate->PresetBagCount;
+
+    Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
+    sfPresetBag *PresetBag =
+        Prestate->PresetBags + Prestate->PresetBagCount++;
+    ZeroStruct(*PresetBag);
+    PresetBag->wGenNdx = Prestate->PresetGeneratorCount;
+    PresetBag->wModNdx = Prestate->PresetModulatorCount;
+
+    Assert(Prestate->PresetModulatorCount < ArrayCount(Prestate->PresetModulators));
     sfModList *PresetModulator =
-        PreState->PresetModulators + PreState->PresetModulatorCount++;
+        Prestate->PresetModulators + Prestate->PresetModulatorCount++;
     ZeroStruct(*PresetModulator);
 
-    Assert(PreState->PresetGeneratorCount < ArrayCount(PreState->PresetGenerators));
+    Assert(Prestate->PresetGeneratorCount < ArrayCount(Prestate->PresetGenerators));
     sfGenList *PresetGenerator =
-        PreState->PresetGenerators + PreState->PresetGeneratorCount++;
+        Prestate->PresetGenerators + Prestate->PresetGeneratorCount++;
     ZeroStruct(*PresetGenerator);
 
-    Assert(PreState->InstrumentCount < ArrayCount(PreState->Instruments));
+    Assert(Prestate->InstrumentCount < ArrayCount(Prestate->Instruments));
     sfInst *Instrument =
-        PreState->Instruments + PreState->InstrumentCount++;
+        Prestate->Instruments + Prestate->InstrumentCount++;
     ZeroStruct(*Instrument);
+    sprintf(Instrument->achInstName, "%s", "EOI");
+    Instrument->wInstBagNdx = Prestate->InstrumentBagCount;
 
-    Assert(PreState->InstrumentBagCount < ArrayCount(PreState->InstrumentBags));
+    Assert(Prestate->InstrumentBagCount < ArrayCount(Prestate->InstrumentBags));
     sfInstBag *InstrumentBag =
-        PreState->InstrumentBags + PreState->InstrumentBagCount++;
+        Prestate->InstrumentBags + Prestate->InstrumentBagCount++;
     ZeroStruct(*InstrumentBag);
+    InstrumentBag->wInstGenNdx = Prestate->InstrumentGeneratorCount;
+    InstrumentBag->wInstModNdx = Prestate->InstrumentModulatorCount;
 
-    Assert(PreState->InstrumentModulatorCount < ArrayCount(PreState->InstrumentModulators));
+    Assert(Prestate->InstrumentModulatorCount < ArrayCount(Prestate->InstrumentModulators));
     sfModList *InstrumentModulator =
-        PreState->InstrumentModulators + PreState->InstrumentModulatorCount++;
+        Prestate->InstrumentModulators + Prestate->InstrumentModulatorCount++;
     ZeroStruct(*InstrumentModulator);
 
-    Assert(PreState->InstrumentGeneratorCount < ArrayCount(PreState->InstrumentGenerators));
+    Assert(Prestate->InstrumentGeneratorCount < ArrayCount(Prestate->InstrumentGenerators));
     sfInstGenList *InstrumentGenerator =
-        PreState->InstrumentGenerators + PreState->InstrumentGeneratorCount++;
+        Prestate->InstrumentGenerators + Prestate->InstrumentGeneratorCount++;
     ZeroStruct(*InstrumentGenerator);
 
-    Assert(PreState->SampleCount < ArrayCount(PreState->Samples));
+    Assert(Prestate->SampleCount < ArrayCount(Prestate->Samples));
     sfSample *Sample =
-        PreState->Samples + PreState->SampleCount++;
+        Prestate->Samples + Prestate->SampleCount++;
     ZeroStruct(*Sample);
+    sprintf(Sample->achSampleName, "%s", "EOS");
+
 }
 
 
@@ -530,38 +891,164 @@ CreateTerminals(sf_pre_state *PreState)
 // Main ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-inline void
-WriteSubChunk(sub_chunk *SubChunk, FILE *File)
+#if 0
+internal size_t
+WriteChunk(chunk *Chunk, FILE *File)
 {
-    fwrite(&SubChunk->ID, StringLength(SubChunk->ID), 1, OutputSF2);
-    fwrite(&SubChunk->Size, sizeof(SubChunk->Size), 1, OutputSF2);
-    fwrite(SubChunk->Data, SubChunk->Size, 1, OutputSF2);
+    fwrite(&Chunk->ckID, sizeof(Chunk->ckID), 1, File);
+    fwrite(&Chunk->ckSize, sizeof(Chunk->ckSize), 1, File);
+    fwrite(&Chunk->ckHeader, sizeof(Chunk->ckHeader), 1, File);
+
+    size_t Result = sizeof(Chunk->ckID) + sizeof(Chunk->ckHeader) + sizeof(Chunk->ckSize);
+    // TODO: (KAPSY) Would just be easier to iterate a sub chunk array here.
+
+    return(Result);
+}
+#endif
+
+internal size_t
+WriteChunk(chunk *Chunk, FILE *File)
+{
+    fwrite(&Chunk->ckID, sizeof(Chunk->ckID), 1, File);
+    fwrite(&Chunk->ckSize, sizeof(Chunk->ckSize), 1, File);
+    fwrite(Chunk->ckDATA, Chunk->ckSize, 1, File);
+
+    size_t Result = sizeof(Chunk->ckID) + sizeof(Chunk->ckSize) + Chunk->ckSize;
+    return(Result);
 }
 
+internal size_t
+WriteListChunk(chunk *Chunk, FILE *File)
+{
+    size_t SizeOfListChunkHeader = sizeof(FOURCC);
+
+    fwrite(&Chunk->ckID, sizeof(Chunk->ckID), 1, File);
+    fwrite(&Chunk->ckSize, sizeof(Chunk->ckSize), 1, File);
+    fwrite(Chunk->ckDATA, SizeOfListChunkHeader, 1, File);
+
+    size_t Result = sizeof(Chunk->ckID) + sizeof(Chunk->ckSize) + SizeOfListChunkHeader;
+    return(Result);
+}
+
+// TODO: (KAPSY) The way we should be doing this is:
+// - Everything is a chunk - no concept of chunks/sub_chunks
+// - Chunks, the header is the data.
+#if 0
 internal chunk
-NewChunk(char *ID, char *Header, size_t Size = 0)
+NewChunk(char *ID, char *Header)
 {
     chunk Result = {};
     Assert((StringLength(Header) == 4) && (StringLength(ID) == 4));
-    Result.ckID = (FOURCC)(*ID);
-    Result.ckHeader = (FOURCC)(*Header);
-    Result.ckSize = Size;
+    Result.ckID = *((FOURCC *)ID);
+    Result.ckHeader = *((FOURCC *)Header);
+
+    // NOTE: (KAPSY) The header is included in the size.
+    size_t SizeOfChunkHeader = sizeof(FOURCC);
+    Result.ckSize = SizeOfChunkHeader;
+
+    return(Result);
+}
+#endif
+
+internal chunk *
+NewChunk(chunk *Parent, char *ID, size_t Size, void *Data)
+{
+    Assert(Parent);
+    Assert((StringLength(ID) == 4));
+
+    if(!Parent->Children)
+    {
+        Parent->Children = ChunkPool + ChunkPoolPosition;
+        ChunkPoolPosition += MAX_CHILDREN_CHUNKS;
+    }
+
+
+    Assert(Parent->ChildrenCount < MAX_CHILDREN_CHUNKS);
+
+    chunk *Result = Parent->Children + Parent->ChildrenCount++;
+    Result->ckID = *((FOURCC *)ID);
+    Result->ckSize = Size;
+    Result->ckDATA = (BYTE *)Data;
 
     return(Result);
 }
 
-internal sub_chunk
-NewSubChunk(chunk *ParentChunk, char *ID, size_t Size, void *Data)
+internal chunk *
+NewStringChunk(chunk *ParentChunk, char *ID, char *String)
+{
+    chunk *Result = NewChunk(ParentChunk, ID, StringLength(String), String);
+    return(Result);
+}
+
+internal chunk
+NewRIFFChunk()
 {
     chunk Result = {};
-    Assert((StringLength(ID) == 4));
-    Result.ckID = (FOURCC)(*ID);
-    Result.ckSize = Size;
-    Result.ckData = (BYTE *)Data;
-    ParentChunk->Size += Size;
-
+    Result.ckID = *((FOURCC *)"RIFF");
+    Result.ckSize = sizeof(FOURCC);
+    Result.ckDATA = (BYTE *)"sfbk";
     return(Result);
 }
+
+internal char *
+WordAlignedString(char *String, int *OutLength)
+{
+    char *Result = 0;
+    int Length = StringLength(String) + 1;
+    if(Length%2 != 0)
+    {
+        ++Length;
+    }
+
+    Result = (char *)calloc(Length, 0);
+    sprintf(Result, "%s", String);
+
+    *OutLength = Length;
+    return(Result);
+}
+
+inline size_t
+TotalSize(chunk *Chunk)
+{
+    size_t Result = 0;
+    Result+= sizeof(Chunk->ckID);
+    Result+= sizeof(Chunk->ckSize);
+    Result+= Chunk->ckSize;
+    return(Result);
+}
+
+
+internal size_t
+CalcChunkSizes(chunk *Chunk)
+{
+    for(u32 ChildIndex = 0;
+            ChildIndex < Chunk->ChildrenCount;
+            ++ChildIndex)
+    {
+        chunk *Child = Chunk->Children + ChildIndex;
+        Chunk->ckSize += CalcChunkSizes(Child);
+    }
+
+    return(TotalSize(Chunk));
+}
+
+internal void
+WriteAllChunks(chunk *Root, FILE *File, size_t *BytesWritten)
+{
+    if(Root->Children)
+    { *BytesWritten+=WriteListChunk(Root, File); }
+    else
+    { *BytesWritten+=WriteChunk(Root, File); }
+
+    for(u32 ChildIndex = 0;
+            ChildIndex < Root->ChildrenCount;
+            ++ChildIndex)
+    {
+        chunk *Child = Root->Children + ChildIndex;
+        WriteAllChunks(Child, File, BytesWritten);
+    }
+}
+
 
 int main(int argc, char **argv)
 {
@@ -582,33 +1069,53 @@ int main(int argc, char **argv)
 
     kapsy_PrintArgs(argc, argv);
 
-    collated_args CollatedArgs[ArrayCount(ArgDefs)] = {};
+    collated_args CollatedArgs = {};
 
     kapsy_GetCollatedArgs(argc, argv, ArgDefs, ArrayCount(ArgDefs), &CollatedArgs);
 
     kapsy_PrintCollatedArgs(&CollatedArgs);
 
-    if(CollatedArgs[sf2bbArg_Input].Found)
+    if(CollatedArgs.Args[sf2bbArg_Input].ValueCount)
     {
-        Assert(CollatedArgs[sf2bbArg_Input].Count == 1);
+        Assert(CollatedArgs.Args[sf2bbArg_Input].ValueCount == 1);
 
-        char *WavPath = [sf2bbArg_Input].Values[0];
+        char *WavPath = CollatedArgs.Args[sf2bbArg_Input].Values[0];
+#if 0
         unsigned int WavSize = GetWaveFileSize(WavPath);
 
 
         wav_header WavHeader = LoadWavFile(WavPath);
 
         char *WavData = ;
+#endif
 
         // NOTE: (KAPSY) Setup the SF pre state.
-        sf_pre_state PreState = {};
+        sf_prestate Prestate = {};
 
-        int SampleIndex = CreateSample(&PreState, [sf2bbArg_Input].Values[0]);
+        // int SampleIndex = CreateSample(&Prestate, CollatedArgs.Args[sf2bbArg_Input].Values[0]);
+        // int SampleIndex = CreateSample(&Prestate, "/Users/pitorimaikeru/audio/fukth34mat_japan/_apps/sf2bb/data/beat_byte_daiei_031.wav");
 
-        int InstrumentIndex = CreateInstrument(&PreState, InstrumentParams);
+        int SampleIndex = CreateTestSample(&Prestate);
+
+        sf_inst_params InstParams =
+        {
+            .Name = "MyInstrument"
+        };
+
+        int InstrumentIndex = CreateInst(&Prestate, InstParams);
         // TODO: (KAPSY) Should be part of the instrument?
         int CurrentNote = C3;
         int TuningOffset = 6;
+
+        sf_preset_params PresetParams =
+        {
+            .Name = "MyPreset"
+        };
+
+        int PresetIndex = CreatePreset(&Prestate, PresetParams);
+
+        int Divisions[] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+        int DivisionsStart = 0;
 
         // NOTE: (KAPSY) Get the division values in frames.
         int TotalDivisions = 0;
@@ -619,16 +1126,18 @@ int main(int argc, char **argv)
             TotalDivisions+=Divisions[DivIndex];
         }
 
-        float FrameRate = 44100.f;
+        float FrameRate = 44100.f; // TODO: (KAPSY) Take this from the sample.
         float DivisionSize = 16.f; // TODO: (KAPSY) Parameterize?
-        float BeatsPerMinute = ;
+        float BeatsPerMinute = 130.f;
         float MeasuresPerMinute = BeatsPerMinute/4.f;
         float SecondsPerMeasure = 1.f/(MeasuresPerMinute/60.f);
         float FramesPerDivision = (SecondsPerMeasure/DivisionSize)*FrameRate;
         float FramePos = (float)DivisionsStart*FramesPerDivision;
 
+        CreateGlobalZone(&Prestate);
+
         for(int DivIndex=0;
-                DivIndex < ArrayCount(Divisions);
+                DivIndex < 1;//ArrayCount(Divisions);
                 ++DivIndex)
         {
             float FramesThisDivision =
@@ -636,278 +1145,167 @@ int main(int argc, char **argv)
 
             sf_zone_params ZoneParams =
             {
+                .InstrumentIndex = InstrumentIndex,
                 .SampleIndex = SampleIndex,
                 .SampleStart = RoundReal32ToUInt32(FramePos),
                 .SampleEnd = RoundReal32ToUInt32(FramePos + FramesThisDivision),
                 .Key = CurrentNote,
                 .TuningOffset = TuningOffset,
             };
-            CreateZone(InstrumentIndex, ZoneParams);
+            CreateZone(&Prestate, ZoneParams);
 
             FramePos+=FramesThisDivision;
+            ++CurrentNote;
         }
 
-        CreateTerminals(&PreState);
+        CreateTerminals(&Prestate);
 
-        FILE *OutputSF2 = fopen(InputFileName, "wd");
-        size_t BytesWritten = 0;
+        FILE *OutputSF2 = fopen("testout.sf2", "wd");
 
-        chunk RiffChunk = NewChunk("RIFF", "sfbk");
-
-        int ChunkSize = sizeof(sf2_chunk);
+        chunk RiffChunk = NewRIFFChunk();
 
         ///////////////////////////////////////////////////////////////////////
         // Info Chunk /////////////////////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
 
-        chunk InfoList = NewChunk("LIST", "INFO");
+        chunk *InfoList = NewStringChunk(&RiffChunk, "LIST", "INFO");
 
         sfVersionTag VersionTag = { 1, 0 };
-        sub_chunk VersionChunk = NewSubChunk(&InfoList, "ifil",
-                sizeof(sfVersionTag), (void *)VersionTag);
+        NewChunk(InfoList, "ifil",
+                sizeof(sfVersionTag), (void *)&VersionTag);
 
-        char *EngineString = WordAlignedString("Battery");
-        sub_chunk EngineChunk = NewSubChunk(&InfoList, "isng",
-                StringLength(EngineChunk), (void *)EngineString);
+        int EngineStringLength = 0;
+        char *EngineString = WordAlignedString("EMU8000", &EngineStringLength);
+        NewChunk(InfoList, "isng",
+                EngineStringLength, (void *)EngineString);
 
-        char *NameString = WordAlignedString("Kapsy");
-        sub_chunk NameChunk = NewSubChunk(&InfoList, "INAM",
-                StringLength(NameString), (void *)NameString);
+        int NameStringLength = 0;
+        char *NameString = WordAlignedString("Test", &NameStringLength);
+        NewChunk(InfoList, "INAM",
+                NameStringLength, (void *)NameString);
 
+        int CreatorStringLength = 0;
+        char *CreatorString = WordAlignedString("Polyphone", &CreatorStringLength);
+        NewChunk(InfoList, "ISFT",
+                CreatorStringLength, (void *)CreatorString);
         ///////////////////////////////////////////////////////////////////////
         // sdta Chunk /////////////////////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
 
-        chunk sdtaList = NewChunk("LIST", "sdta");
+        chunk *sdtaList = NewStringChunk(&RiffChunk, "LIST", "sdta");
+
+        u32 BytesPerWord = 2;
+        u32 SampleData16Size = Prestate.SampleDataCount*BytesPerWord;
+        NewChunk(sdtaList, "smpl",
+                SampleData16Size, (void *)Prestate.SampleData16);
+
+        // u32 SampleData24Size = Prestate.SampleDataCount;
+        // NewChunk(sdtaList, "sm24",
+                // SampleData24Size, (void *)Prestate.SampleData24);
 
         ///////////////////////////////////////////////////////////////////////
         // pdta Chunk /////////////////////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
 
-        chunk pdtaList = NewChunk("LIST", "pdta");
+        chunk *pdtaList = NewStringChunk(&RiffChunk, "LIST", "pdta");
+
+        NewChunk(pdtaList, "phdr",
+                sizeof(sfPresetHeader)*Prestate.PresetCount,
+                (void *)Prestate.Presets);
+
+        NewChunk(pdtaList, "pbag",
+                sizeof(sfPresetBag)*Prestate.PresetBagCount,
+                (void *)Prestate.PresetBags);
+
+        NewChunk(pdtaList, "pmod",
+                sizeof(sfModList)*Prestate.PresetModulatorCount,
+                (void *)Prestate.PresetModulators);
+
+        NewChunk(pdtaList, "pgen",
+                sizeof(sfGenList)*Prestate.PresetGeneratorCount,
+                (void *)Prestate.PresetGenerators);
+
+        NewChunk(pdtaList, "inst",
+                sizeof(sfInst)*Prestate.InstrumentCount,
+                (void *)Prestate.Instruments);
+
+        NewChunk(pdtaList, "ibag",
+                sizeof(sfInstBag)*Prestate.InstrumentBagCount,
+                (void *)Prestate.InstrumentBags);
+
+        NewChunk(pdtaList, "imod",
+                sizeof(sfModList)*Prestate.InstrumentModulatorCount,
+                (void *)Prestate.InstrumentModulators);
+
+        NewChunk(pdtaList, "igen",
+                sizeof(sfInstGenList)*Prestate.InstrumentGeneratorCount,
+                (void *)Prestate.InstrumentGenerators);
+
+        NewChunk(pdtaList, "shdr",
+                sizeof(sfSample)*Prestate.SampleCount,
+                (void *)Prestate.Samples);
+
+
+        CalcChunkSizes(&RiffChunk);
+
+        size_t BytesWritten = 0;
+
+        WriteAllChunks(&RiffChunk, OutputSF2, &BytesWritten);
+
+
+
 
 
 #if 0
+        size_t SizeOfChunkHeader = sizeof(FOURCC);
+        size_t SizeOfChunkID = sizeof(FOURCC);
+        size_t SizeOfChunkSize = sizeof(DWORD);
 
-            sfPresetHeader PresetHeaders[2] =
-            {
-                // {
-                    // .achPresetName = "TestName";
-                    // .wPreset = 0;
-                    // .wBank = 0;
-                    // .wPresetBagNdx = 0;
-                    // .dwLibrary = 0;
-                    // .dwGenre = 0;
-                    // .dwMorphology = 0;
-                // },
-                {
-                    .achPresetName = "EOP";
-                    .wPreset = 0;
-                    .wBank = 0;
-                    .wPresetBagNdx = 0;
-                    .dwLibrary = 0;
-                    .dwGenre = 0;
-                    .dwMorphology = 0;
-                },
-            }
-            sub_chunk PresetHeadersChunk = NewSubChunk(&pdtaList, "phdr");
-            PresetHeadersChunk.Data = (void *)PresetHeaders;
-            PresetHeadersChunk.Size = sizeof(PresetHeaders);
+        size_t TotalWritten = 0;
+        TotalWritten+=WriteChunk(&RiffChunk, OutputSF2);
 
-            // NOTE: (KAPSY) Seems that each bag needs a terminator???
-            sfPresetBag PresetBags[] =
-            {
-                // {
-                    // .wGenNdx = 0;
-                    // .wModNdx = 0;
-                // },
-                // TODO: (Kapsy) Terminal Zone. Does this mean that all indexes
-                // start from one?
-                // Looking at the example file this doesn't seem to be the
-                // case.
-                {
-                    .wGenNdx = 0;
-                    .wModNdx = 0;
-                }
-            };
-            sub_chunk PresetBagChunk = NewSubChunkA(&pdtaList, "pbag");
-            PresetBagChunk.Data = (void *)PresetBags;
-            PresetBagChunk.Size = sizeof(PresetBags);
+        TotalWritten+=WriteChunk(&InfoList, OutputSF2);
+        TotalWritten+=WriteChunk(&VersionChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&EngineChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&NameChunk, OutputSF2);
 
-            // NOTE: (KAPSY) Since we don't use these we just use a terminator.
-            sfModList PresetModulators[] =
-            {
-                {
-                    sfModSrcOper = 0;
-                    sfModDestOper = 0;
-                    modAmount = 0;
-                    sfModAmtSrcOper = 0;
-                    sfModTransOper = 0;
-                }
-            };
-            sub_chunk PresetModulatorsChunk = NewSubChunk(&pdtaList, "pmod");
-            PresetModulatorsChunk.Data = (void *)PresetModulators;
-            PresetModulatorsChunk.Size = sizeof(PresetModulators);
+        TotalWritten+=WriteChunk(&sdtaList, OutputSF2);
+        TotalWritten+=WriteChunk(&Sample16Chunk, OutputSF2);
+        TotalWritten+=WriteChunk(&Sample24Chunk, OutputSF2);
 
+        // TODO: (KAPSY) When adding the sub chunks should just add them to an
+        // array within the main chunk and then iterate.
+        TotalWritten+=WriteChunk(&pdtaList, OutputSF2);
+        TotalWritten+=WriteChunk(&PresetHeadersChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&PresetBagsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&PresetModulatorsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&PresetGeneratorsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&InstrumentsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&InstrumentBagsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&InstrumentModulatorsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&InstrumentGeneratorsChunk, OutputSF2);
+        TotalWritten+=WriteChunk(&SamplesChunk, OutputSF2);
 
-            sfGenList PresetGenerators[] =
-            {
-                // {
-                    // .sfGenOper = 0;
-                    // .genAmount = 0;
-                // },
-                {
-                    .sfGenOper = 0;
-                    .genAmount = 0;
-                },
-            };
-            sub_chunk PresetGeneratorsChunk = NewSubChunk(&pdtaList, "pgen");
-            PresetGeneratorsChunk.Data = (void *)PresetGenerators;
-            PresetGeneratorsChunk.Size = sizeof(PresetGenerators);
+        RiffChunk.ckSize += (TotalSize(&InfoList) +
+                             TotalSize(&sdtaList) +
+                             TotalSize(&pdtaList));
 #endif
 
+        size_t SizeOfChunkHeader = sizeof(FOURCC);
+        size_t SizeOfChunkID = sizeof(FOURCC);
+        size_t SizeOfChunkSize = sizeof(DWORD);
 
-
-            sub_chunk PresetHeadersChunk =
-                NewSubChunk(&pdtaList, "phdr",
-                        sizeof(sfPresetHeader)*PreState.PresetHeaderCount,
-                        (void *)PreState.PresetPresetHeaders);
-
-            sub_chunk PresetBagsChunk =
-                NewSubChunk(&pdtaList, "pbag",
-                        sizeof(sfPresetBag)*PreState.PresetBagCount,
-                        (void *)PreState.PresetPresetBags);
-
-            sub_chunk PresetModulatorsChunk =
-                NewSubChunk(&pdtaList, "pmod",
-                        sizeof(sfModList)*PreState.PresetModulatorCount,
-                        (void *)PreState.PresetPresetModulators);
-
-            sub_chunk PresetGeneratorsChunk =
-                NewSubChunk(&pdtaList, "pgen",
-                        sizeof(sfGenList)*PreState.PresetGeneratorCount,
-                        (void *)PreState.PresetPresetGenerators);
-
-            sub_chunk InstrumentsChunk =
-                NewSubChunk(&pdtaList, "inst",
-                        sizeof(sfInst)*PreState.InstrumentCount,
-                        (void *)PreState.Instruments);
-
-            sub_chunk InstrumentBagsChunk =
-                NewSubChunk(&pdtaList, "ibag",
-                        sizeof(sfInstBag)*PreState.InstrumentBagCount,
-                        (void *)PreState.InstrumentBags);
-
-            sub_chunk InstrumentModulatorsChunk =
-                NewSubChunk(&pdtaList, "imod",
-                        sizeof(sfModList)*PreState.InstrumentModulatorCount,
-                        (void *)PreState.InstrumentModulators);
-
-            sub_chunk InstrumentGeneratorsChunk =
-                NewSubChunk(&pdtaList, "igen",
-                        sizeof(sfInstGenList)*PreState.InstrumentGeneratorCount,
-                        (void *)PreState.InstrumentGenerators);
-
-            sub_chunk SamplesChunk =
-                NewSubChunk(&pdtaList, "inst",
-                        sizeof(sfInst)*PreState.SampleCount,
-                        (void *)PreState.Samples);
-
-
-#if 0
-            sfInst Instruments[] =
-            {
-                {
-                    .achInstName = "Kapsy's Instrument",
-                    0
-                },
-                {
-                    0,
-                    0
-                }
-            }
-            sub_chunk InstrumentsChunk = NewSubChunk(&pdtaList, "inst");
-            InstrumentsChunk.Data = (void *)Instruments;
-            InstrumentsChunk.Size = sizeof(InstrumentsChunk);
-
-            sfInstBag InstrumentBags[] =
-            {
-                {
-                    0,
-                    0,
-                },
-                {
-                    0,
-                    0,
-                },
-            };
-            sub_chunk InstrumentBagsChunk = NewSubChunk(&pdtaList, "ibag");
-            InstrumentBagsChunk.Data = (void *)Instruments;
-            InstrumentBagsChunk.Size = sizeof(InstrumentBagsChunk);
-
-
-            sfModList InstrumentZoneModulators[] =
-            {
-                // TODO: (KAPSY) SHOULD use enums here so we know what the hell
-                // we are doing.
-                {
-                    sfModSrcOper = 0;
-                    sfModDestOper = 0;
-                    modAmount = 0;
-                    sfModAmtSrcOper = 0;
-                    sfModTransOper = 0;
-                },
-                {
-                    sfModSrcOper = 0;
-                    sfModDestOper = 0;
-                    modAmount = 0;
-                    sfModAmtSrcOper = 0;
-                    sfModTransOper = 0;
-                }
-            };
-            sub_chunk InstrumentZoneModulatorsChunk = NewSubChunk(&pdtaList, "imod");
-            InstrumentZoneModulatorsChunk.Data = (void *)InstrumentZoneModulators;
-            InstrumentZoneModulatorsChunk.Size = sizeof(InstrumentZoneModulators);
-
-
-            sfInstGenList InstrumentZoneGenerators[] =
-            {
-                {
-                    0,
-                    0,
-                },
-                {
-                    0,
-                    0,
-                },
-            };
-            sub_chunk InstrumentZoneGeneratorsChunk = NewSubChunk(&pdtaList, "imod");
-            InstrumentZoneGeneratorsChunk.Data = (void *)InstrumentZoneGenerators;
-            InstrumentZoneGeneratorsChunk.Size = sizeof(InstrumentZoneGenerators);
-
-
-
-
-
-
-
-            // WriteChunk(&InfoList, OutputSF2);
-            // WriteSubChunk(&VersionChunk, OutputSF2);
-            // WriteSubChunk(&EngineChunk, OutputSF2);
-            // WriteSubChunk(&NameChunk, OutputSF2);
-#endif
-
-        }
-
+        Assert(BytesWritten ==
+                (RiffChunk.ckSize + SizeOfChunkID + SizeOfChunkSize));
 
     }
     else
     {
+        fprintf(stderr, "No input wave file specified!\n");
         return(EXIT_FAILURE);
     }
 
-
-
+    printf("File successfully created!\n");
 
     return(EXIT_SUCCESS);
 }

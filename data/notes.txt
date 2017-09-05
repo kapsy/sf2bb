@@ -142,6 +142,11 @@ sf2_zone Zone2Params =
 };
 CreateZone(&Inst, Zone2Params);
 
+---
+
+
+0000000: 5249 4646 6647 2700 7366 626b 4c49 5354  RIFFfG'.sfbkLIST
+size is 274766, file size is 27 47 6e, so I guess there's a padding byte.
 
 
 

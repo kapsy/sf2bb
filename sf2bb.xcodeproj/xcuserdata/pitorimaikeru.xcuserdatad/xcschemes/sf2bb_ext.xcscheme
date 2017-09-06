@@ -57,7 +57,7 @@
       </MacroExpansion>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "--input my_cool_beat.wav --divisions 1,1,1,2,2,2,1,1,3 --monoleft --normalize"
+            argument = "--input ../data/beat_byte_recurse_037_m16.wav --divisions 1,1,1,2,2,2,1,1,3 --monoleft --normalize"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

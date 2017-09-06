@@ -529,7 +529,7 @@ CreateTestSample(sf_prestate *Prestate)
     *SampleOut16++ = 0x0;
 
     *SampleOut16++ = 0xFF;
-    *SampleOut16++ = 0xFF;
+    *SampleOut16++ = 0x7F;
 
     for(u32 PaddingIndex = 0;
             PaddingIndex < PaddingCount;
@@ -639,21 +639,23 @@ CreateSample(sf_prestate *Prestate, char *Path)
             FrameIndex < FrameCount;
             ++FrameIndex)
     {
-        *SampleOut24++ = *SampleIn++;
+        // *SampleOut24++ = *SampleIn++;
         *SampleOut16++ = *SampleIn++;
         *SampleOut16++ = *SampleIn++;
 
         // TODO: (KASPY) Mono file support.
-        *SampleOut24++ = *SampleIn++;
-        *SampleOut16++ = *SampleIn++;
-        *SampleOut16++ = *SampleIn++;
+        // *SampleOut24++ = *SampleIn++;
+        // *SampleOut16++ = *SampleIn++;
+        // *SampleOut16++ = *SampleIn++;
     }
 
     int IndexLeft = Prestate->SampleCount++;
     sfSample *SampleLeft = Prestate->Samples + IndexLeft;
 
+#if 0
     int IndexRight = Prestate->SampleCount++;
     sfSample *SampleRight = Prestate->Samples + IndexRight;
+#endif
 
     sprintf(SampleLeft->achSampleName, "%s", "TestSample");
     SampleLeft->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
@@ -665,11 +667,12 @@ CreateSample(sf_prestate *Prestate, char *Path)
     SampleLeft->chPitchCorrection = 0;
     // NOTE: (KAPSY) Index for the sample of the other channel -
     // interleaved not supported!
-    SampleLeft->wSampleLink = IndexRight;
-    SampleLeft->sfSampleType = leftSample;
+    SampleLeft->wSampleLink = 0;
+    SampleLeft->sfSampleType = monoSample;
     Prestate->SampleDataCount+=FrameCountPadded;
 
 
+#if 0
     sprintf(SampleRight->achSampleName, "%s", "TestSample");
     SampleRight->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
     SampleRight->dwEnd = Prestate->SampleDataCount + FrameCount;
@@ -681,6 +684,7 @@ CreateSample(sf_prestate *Prestate, char *Path)
     SampleRight->wSampleLink = 0;
     SampleRight->sfSampleType = rightSample;
     Prestate->SampleDataCount+=FrameCountPadded;
+#endif
 
     return(IndexLeft);
 }
@@ -738,10 +742,10 @@ CreatePreset(sf_prestate *Prestate, sf_preset_params Params)
     //
     //
 
-    Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
-    sfPresetBag *PresetBag =
-        Prestate->PresetBags + Prestate->PresetBagCount++;
-    ZeroStruct(*PresetBag);
+    // Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
+    // sfPresetBag *PresetBag =
+        // Prestate->PresetBags + Prestate->PresetBagCount++;
+    // ZeroStruct(*PresetBag);
 
     Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
     sfPresetBag *PresetBag2 =
@@ -749,8 +753,8 @@ CreatePreset(sf_prestate *Prestate, sf_preset_params Params)
     ZeroStruct(*PresetBag2);
 
 
-    genAmountType Ranges = { .ranges = { 0, 0x7f } };
-    CreatePresetGenerator(Prestate, keyRange, Ranges);
+    // genAmountType Ranges = { .ranges = { 0, 0x7f } };
+    // CreatePresetGenerator(Prestate, keyRange, Ranges);
 
     genAmountType InstrumentIndex = { .wAmount = 0 };
     CreatePresetGenerator(Prestate, instrument, InstrumentIndex);
@@ -794,8 +798,21 @@ CreateZone(sf_prestate *Prestate, sf_zone_params Params)
     InstBag->wInstGenNdx = Prestate->InstrumentGeneratorCount;
     InstBag->wInstModNdx = Prestate->InstrumentModulatorCount;
 
-    // CreateInstGenerator(Prestate, startAddrsOffset, Params.SampleStart);
-    // CreateInstGenerator(Prestate, endAddrsOffset, Params.SampleEnd);
+    s32 CoarseGrain = (1 << 15);
+
+    s32 StartCoarse = (Params.SampleStart/CoarseGrain);
+    s32 StartFine = Params.SampleStart - StartCoarse*CoarseGrain;
+    genAmountType SampleStartCoarse = { .shAmount = (SHORT)StartCoarse };
+    CreateInstGenerator(Prestate, startAddrsCoarseOffset, SampleStartCoarse);
+    genAmountType SampleStartFine = { .shAmount = (SHORT)StartFine };
+    CreateInstGenerator(Prestate, startAddrsOffset, SampleStartFine);
+
+    s32 EndCoarse = (Params.SampleEnd/CoarseGrain);
+    s32 EndFine = Params.SampleEnd - EndCoarse*CoarseGrain;
+    genAmountType SampleEndCoarse = { .shAmount = (SHORT)EndCoarse };
+    CreateInstGenerator(Prestate, endAddrsCoarseOffset, SampleEndCoarse);
+    genAmountType SampleEndFine = { .shAmount = (SHORT)EndFine };
+    CreateInstGenerator(Prestate, endAddrsOffset, SampleEndFine);
 
     // TODO: (KAPSY) Proper conversion functions for these times.
     // CreateInstGenerator(Prestate, delayVolEnv, -32768);
@@ -805,8 +822,12 @@ CreateZone(sf_prestate *Prestate, sf_zone_params Params)
     // CreateInstGenerator(Prestate, sustainVolEnv, 0);
     // CreateInstGenerator(Prestate, releaseVolEnv, -7973);
 
-    // genAmountType KeyRange = { .ranges = { 0, 0x7f } };
-    // CreateInstGenerator(Prestate, keyRange, KeyRange);
+    genAmountType KeyRange = { .ranges = { (BYTE)Params.Key, (BYTE)Params.Key } };
+    CreateInstGenerator(Prestate, keyRange, KeyRange);
+
+    genAmountType OverridingRootKey = { .shAmount = (SHORT)Params.Key };
+    CreateInstGenerator(Prestate, overridingRootKey, OverridingRootKey);
+
 
     // genAmountType VelRange = { .ranges = { 0, 0x7f } };
     // CreateInstGenerator(Prestate, velRange, VelRange);
@@ -1092,10 +1113,10 @@ int main(int argc, char **argv)
         // NOTE: (KAPSY) Setup the SF pre state.
         sf_prestate Prestate = {};
 
-        // int SampleIndex = CreateSample(&Prestate, CollatedArgs.Args[sf2bbArg_Input].Values[0]);
+        int SampleIndex = CreateSample(&Prestate, CollatedArgs.Args[sf2bbArg_Input].Values[0]);
         // int SampleIndex = CreateSample(&Prestate, "/Users/pitorimaikeru/audio/fukth34mat_japan/_apps/sf2bb/data/beat_byte_daiei_031.wav");
 
-        int SampleIndex = CreateTestSample(&Prestate);
+        // int SampleIndex = CreateTestSample(&Prestate);
 
         sf_inst_params InstParams =
         {
@@ -1109,13 +1130,13 @@ int main(int argc, char **argv)
 
         sf_preset_params PresetParams =
         {
-            .Name = "MyPreset"
+            .Name = "KapsysPreset"
         };
 
         int PresetIndex = CreatePreset(&Prestate, PresetParams);
 
-        int Divisions[] = { 2, 2, 2, 2, 2, 2, 2, 2 };
-        int DivisionsStart = 0;
+        int Divisions[] = { 2, 2, 2, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 2, 2, 2 };
+        int DivisionsStart = 24;
 
         // NOTE: (KAPSY) Get the division values in frames.
         int TotalDivisions = 0;
@@ -1128,27 +1149,35 @@ int main(int argc, char **argv)
 
         float FrameRate = 44100.f; // TODO: (KAPSY) Take this from the sample.
         float DivisionSize = 16.f; // TODO: (KAPSY) Parameterize?
-        float BeatsPerMinute = 130.f;
+        float BeatsPerMinute = 122.f;
         float MeasuresPerMinute = BeatsPerMinute/4.f;
         float SecondsPerMeasure = 1.f/(MeasuresPerMinute/60.f);
         float FramesPerDivision = (SecondsPerMeasure/DivisionSize)*FrameRate;
         float FramePos = (float)DivisionsStart*FramesPerDivision;
 
-        CreateGlobalZone(&Prestate);
+        sfSample *Sample = Prestate.Samples + SampleIndex;
+        float FrameCount = (float)(Sample->dwEnd - Sample->dwStart);
+
+        // CreateGlobalZone(&Prestate);
 
         for(int DivIndex=0;
-                DivIndex < 1;//ArrayCount(Divisions);
+                DivIndex < ArrayCount(Divisions);
                 ++DivIndex)
         {
             float FramesThisDivision =
                 (float)Divisions[DivIndex]*FramesPerDivision;
 
+            s32 SampleStart = RoundReal32ToInt32(FramePos);
+            float SampleEnd = (FramePos + FramesThisDivision);
+            s32 SampleEndOffset =
+                RoundReal32ToInt32(0.f - (FrameCount - SampleEnd));
+
             sf_zone_params ZoneParams =
             {
                 .InstrumentIndex = InstrumentIndex,
                 .SampleIndex = SampleIndex,
-                .SampleStart = RoundReal32ToUInt32(FramePos),
-                .SampleEnd = RoundReal32ToUInt32(FramePos + FramesThisDivision),
+                .SampleStart = SampleStart,
+                .SampleEnd = SampleEndOffset,
                 .Key = CurrentNote,
                 .TuningOffset = TuningOffset,
             };
@@ -1170,7 +1199,7 @@ int main(int argc, char **argv)
 
         chunk *InfoList = NewStringChunk(&RiffChunk, "LIST", "INFO");
 
-        sfVersionTag VersionTag = { 1, 0 };
+        sfVersionTag VersionTag = { 2, 1 };
         NewChunk(InfoList, "ifil",
                 sizeof(sfVersionTag), (void *)&VersionTag);
 

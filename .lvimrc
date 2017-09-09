@@ -1,2 +1,4 @@
 set makeprg=./build.sh
-nnoremap <Leader>kj :! ./build/sf2bb --input data/beat_byte_recurse_037_m16.wav --divisions 1,1,1,2,2,2,1,1,3 --monoleft --normalize<CR>
+" nnoremap <Leader>kj :! ./build/sf2bb --input data/beat_byte_recurse_037.wav --output myfile.sf2 --divisions 2,2,2,1,1,1,1,2,2,1,1,1,1,2,2,2 --divisions-start 24 --bpm 122 --monoleft --normalize<CR>
+
+nnoremap <Leader>kj :! ./build/sf2bb --input /Users/pitorimaikeru/audio/fukth34mat_japan/_samples/beat_bytes/beat_byte_bonga_98bpm_052.wav --divisions 2,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,2,1,1,1,1 --divisions-start 24 --bpm 98 --monoleft --normalize<CR>

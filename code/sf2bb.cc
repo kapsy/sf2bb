@@ -6,6 +6,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Arg Handling ///////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
+
 enum
 {
     sf2bbArg_BPM,
@@ -87,7 +88,7 @@ kapsy_GetCollatedArgs(int ArgCount, char **Args,
                 ++DefIndex)
         {
             char *Def = *(Defs + DefIndex);
-            if(kapsy_StringComp(Def, ArgRaw))
+            if(kapsy_StringComp(ArgRaw, Def))
             {
                 CurrentArg = Result->Args + DefIndex;
                 CurrentArg->Found = 1;
@@ -102,7 +103,6 @@ kapsy_GetCollatedArgs(int ArgCount, char **Args,
             *CurrentArgValue = ArgRaw;
         }
     }
-
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -438,7 +438,8 @@ struct sf_inst_zone_params
 
 // NOTE: (KAPSY) All Create() functions are directly translated to the
 // appropriate SF2 structs for file writing. For a more complete editor we
-// would store everything in an editable state.
+// would store everything in state suitable for editing, not for the SF2 file
+// write.
 struct sf_prestate
 {
     u32 SampleDataCount;
@@ -500,7 +501,6 @@ CreateTestSample(sf_prestate *Prestate)
         Assert(!"Unable to allocate sample memory, aborting.\n");
     }
 
-
     BYTE *SampleOut16 =
         (Prestate->SampleData16 + Prestate->SampleDataCount*BytesPerSample16);
 
@@ -524,7 +524,7 @@ CreateTestSample(sf_prestate *Prestate)
     int IndexLeft = Prestate->SampleCount++;
     sfSample *SampleLeft = Prestate->Samples + IndexLeft;
 
-    sprintf(SampleLeft->achSampleName, "%s", "sf2_test_wav");
+    sprintf(SampleLeft->achSampleName, "%s", "test_sample");
     SampleLeft->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
     SampleLeft->dwEnd = Prestate->SampleDataCount + FrameCount;
     SampleLeft->dwStartloop = 0;
@@ -537,6 +537,64 @@ CreateTestSample(sf_prestate *Prestate)
 
     Prestate->SampleDataCount+=FrameCountPadded;
     return(IndexLeft);
+}
+
+internal char *
+StringTruncateKeepingLast4(char *Filename)
+{
+    int Length = StringLength(Filename);
+    char *Result = (char *)calloc(1, Length);
+
+    if(Length <= 20)
+    {
+        StringCopy(Filename, Result);
+    }
+    else
+    {
+        int Index = 0;
+        for(Index = 0; Index < 16; ++Index)
+        {
+            *(Result + Index) = *(Filename + Index);
+        }
+
+        char *LastFour = Filename + (Length - 4);
+        for(Index = 0; Index < 4; ++Index)
+        {
+            *(Result + 16 + Index) = *(LastFour + Index);
+        }
+        *(Result + 20) = 0;
+    }
+
+    return(Result);
+}
+
+internal char *
+GetFilenameOnly(char *Path)
+{
+    int PathLength = StringLength(Path);
+    char *Result = (char *)calloc(1, PathLength + 1);
+    StringCopy(Path, Result);
+
+    for(char *At = Result; *At; ++At)
+    {
+        if(*At == '/' && (*(At+1)))
+        {
+            Result = At+1;
+        }
+    }
+
+    for(char *At = Result + StringLength(Result);
+            At != Result;
+            --At)
+    {
+        if(*At == '.')
+        {
+            *At = 0;
+            break;
+        }
+    }
+
+    return(Result);
 }
 
 internal int
@@ -580,7 +638,7 @@ CreateSample(sf_prestate *Prestate, char *Path)
     // NOTE: (Kapsy) Format->BlockAlign is 6 for stereo 24 bit sample.
     u32 FrameCount = (DataChunk->Size/Format->BlockAlign);
     u32 FrameCountPadded = FrameCount + PaddingCount;
-    u32 SampleCountPadded = FrameCountPadded*Format->NumChannels;
+    u32 SampleCountPadded = FrameCountPadded*1;//Format->NumChannels;
 
     Assert((Format->NumChannels == 1) || (Format->NumChannels == 2));
 
@@ -612,23 +670,38 @@ CreateSample(sf_prestate *Prestate, char *Path)
     }
 
     BYTE *SampleIn = (BYTE *)(DataChunk + 1);
-    BYTE *SampleOut24 =
-        (Prestate->SampleData24 + Prestate->SampleDataCount*BytesPerSample24);
-    BYTE *SampleOut16 =
-        (Prestate->SampleData16 + Prestate->SampleDataCount*BytesPerSample16);
+
+    BYTE *SampleOut24L =
+        (Prestate->SampleData24 +
+         Prestate->SampleDataCount*BytesPerSample24);
+    BYTE *SampleOut16L =
+        (Prestate->SampleData16 +
+         Prestate->SampleDataCount*BytesPerSample16);
+
+#if 0
+    BYTE *SampleOut24R =
+        (Prestate->SampleData24 +
+         ((Prestate->SampleDataCount + FrameCountPadded)*BytesPerSample24));
+    BYTE *SampleOut16R =
+        (Prestate->SampleData16 +
+         ((Prestate->SampleDataCount + FrameCountPadded)*BytesPerSample16));
+#endif
 
     for(u32 FrameIndex = 0;
             FrameIndex < FrameCount;
             ++FrameIndex)
     {
-        // *SampleOut24++ = *SampleIn++;
-        *SampleOut16++ = *SampleIn++;
-        *SampleOut16++ = *SampleIn++;
+        *SampleOut24L++ = *SampleIn++;
+        *SampleOut16L++ = *SampleIn++;
+        *SampleOut16L++ = *SampleIn++;
 
+        SampleIn+=3;
+#if 0
         // TODO: (KASPY) Mono file support.
-        // *SampleOut24++ = *SampleIn++;
-        // *SampleOut16++ = *SampleIn++;
-        // *SampleOut16++ = *SampleIn++;
+        *SampleOut24R++ = *SampleIn++;
+        *SampleOut16R++ = *SampleIn++;
+        *SampleOut16R++ = *SampleIn++;
+#endif
     }
 
     int IndexLeft = Prestate->SampleCount++;
@@ -639,7 +712,14 @@ CreateSample(sf_prestate *Prestate, char *Path)
     sfSample *SampleRight = Prestate->Samples + IndexRight;
 #endif
 
-    sprintf(SampleLeft->achSampleName, "%s", "TestSample");
+    char *FileName = GetFilenameOnly(Path);
+
+    int SampleNameCount = ArrayCount(SampleLeft->achSampleName)-1;
+    int FilenameLength = StringLength(FileName);
+    int FilenameLengthTruncated =
+        ((FilenameLength > SampleNameCount) ? SampleNameCount : FilenameLength);
+
+    sprintf(SampleLeft->achSampleName, "%.*s%s", FilenameLengthTruncated, FileName, "L");
     SampleLeft->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
     SampleLeft->dwEnd = Prestate->SampleDataCount + FrameCount;
     SampleLeft->dwStartloop = 0;
@@ -653,9 +733,8 @@ CreateSample(sf_prestate *Prestate, char *Path)
     SampleLeft->sfSampleType = monoSample;
     Prestate->SampleDataCount+=FrameCountPadded;
 
-
 #if 0
-    sprintf(SampleRight->achSampleName, "%s", "TestSample");
+    sprintf(SampleRight->achSampleName, "%.*s%s", FilenameLengthTruncated, FileName, "R");
     SampleRight->dwStart = Prestate->SampleDataCount; // Offset from the sample data start.
     SampleRight->dwEnd = Prestate->SampleDataCount + FrameCount;
     SampleRight->dwStartloop = 0;
@@ -663,7 +742,7 @@ CreateSample(sf_prestate *Prestate, char *Path)
     SampleRight->dwSampleRate = Format->SampleRate;
     SampleRight->byOriginalPitch = 255;
     SampleRight->chPitchCorrection = 0;
-    SampleRight->wSampleLink = 0;
+    SampleRight->wSampleLink = IndexLeft;
     SampleRight->sfSampleType = rightSample;
     Prestate->SampleDataCount+=FrameCountPadded;
 #endif
@@ -698,7 +777,7 @@ CreateInst(sf_prestate *Prestate, sf_inst_params Params)
     int Index = Prestate->InstrumentCount++;
     sfInst *Inst = Prestate->Instruments + Index;
 
-    Assert(StringLength(Params.Name) < ArrayCount(Inst->achInstName));
+    Assert(StringLength(Params.Name) <= ArrayCount(Inst->achInstName));
     sprintf(Inst->achInstName, "%s", Params.Name);
 
     // NOTE: (KAPSY) Index to the instruments zone list.
@@ -715,7 +794,7 @@ CreatePreset(sf_prestate *Prestate, sf_preset_params Params)
     int Index = Prestate->PresetCount++;
     sfPresetHeader *Preset = Prestate->Presets + Index;
 
-    Assert(StringLength(Params.Name) < ArrayCount(Preset->achPresetName));
+    Assert(StringLength(Params.Name) <= ArrayCount(Preset->achPresetName));
     sprintf(Preset->achPresetName, "%s", Params.Name);
 
     Assert(Prestate->PresetBagCount < ArrayCount(Prestate->PresetBags));
@@ -922,7 +1001,7 @@ WordAlignedString(char *String, int *OutLength)
         ++Length;
     }
 
-    Result = (char *)calloc(Length, 0);
+    Result = (char *)calloc(1, Length);
     sprintf(Result, "%s", String);
 
     *OutLength = Length;
@@ -970,22 +1049,83 @@ WriteAllChunks(chunk *Root, FILE *File, size_t *BytesWritten)
     }
 }
 
+internal int
+StringToInt(char *String)
+{
+    u32 Factor = 1;
+    u32 Result = 0;
+
+    for(u32 Index = StringLength(String);
+            Index > 0;
+            --Index)
+    {
+        char *At = String + (Index - 1);
+        if((*At >= '0') && (*At <= '9'))
+        {
+            Result+=Factor*(*At & 0xF);
+            Factor*=10;
+        }
+        else
+        {
+            Result = -1;
+            break;
+        }
+    }
+
+    /* char *At = String + (StringLength(String)-1);
+    while(At != String)
+    {
+        if((*At >= '0') && (*At <= '9'))
+        {
+            Result+=Factor*(*At & 0xF);
+            Factor*=10;
+        }
+        else
+        {
+            Result = -1;
+            break;
+        }
+        if
+
+
+    }
+ */
+
+    return(Result);
+}
+
+// TODO: (KAPSY) This is wrong - need to do in reverse!
+internal void
+DivisionsFromString(char *Arg, int *Divisions, int *DivisionCount)
+{
+    char *Last = Arg + (StringLength(Arg) - 1);
+    *DivisionCount = 0;
+    u32 Factor = 1;
+    u32 Division = 0;
+    for(char *At = Arg; *At; ++At)
+    {
+        if((*At >= '0') && (*At <= '9'))
+        {
+            Division+=Factor*(*At & 0xF);
+            Factor*=10;
+        }
+        if((*At == ',') || (At == Last))
+        {
+            Divisions[(*DivisionCount)++] = Division;
+            Factor = 1;
+            Division = 0;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     // TODO: (KAPSY)
-    // So here's what we want to do:
-    // -Load a wav file into memory.
-    // -Specify the input params (divisions csvs, mono one channel,
-    // normalize...)
-    //
-    // Example: sf2bb --input my_cool_beat.wav --divisions 1,1,1,2,2,2,1,1,3
-    // --monoleft --normalize
-    //
-    // -Create the SF2 file, will probably have to define the header, arrays
-    // that point to each division, and the division data, and then write it
-    // out appropriately.
-    // Would be great to be able to batch - would actually rather do that in C
-    // here than in a script.
+    // - Specify an output folder, just use the same output name as the input
+    //       file.
+    // - Ability to specify a list of input files. Probably best for us.
+    //       Will take some time as we have to reset state.
+    // - Default AHDSR settings. (1.0, 0, 150.0, 1.0, 4.0)
 
     kapsy_PrintArgs(argc, argv);
 
@@ -995,23 +1135,34 @@ int main(int argc, char **argv)
 
     kapsy_PrintCollatedArgs(&CollatedArgs);
 
-    if(CollatedArgs.Args[sf2bbArg_Input].ValueCount)
+    if(
+            (CollatedArgs.Args[sf2bbArg_Input].ValueCount)
+      )
     {
         Assert(CollatedArgs.Args[sf2bbArg_Input].ValueCount == 1);
 
-        char *WavPath = CollatedArgs.Args[sf2bbArg_Input].Values[0];
+        char *Filename =
+            GetFilenameOnly(CollatedArgs.Args[sf2bbArg_Input].Values[0]);
+        char SF2Filename[(1 << 7)];
+        // TODO: (KAPSY) Should truncate here.
+        Assert((StringLength(Filename) + 4) < ArrayCount(SF2Filename));
+        sprintf(SF2Filename, "%s.sf2", Filename);
+
+        char *FilenameTruncated = StringTruncateKeepingLast4(Filename);
 
         // NOTE: (KAPSY) Setup the SF pre state.
         sf_prestate Prestate = {};
 
-        int SampleIndex = CreateSample(&Prestate, CollatedArgs.Args[sf2bbArg_Input].Values[0]);
+        int SampleIndex = CreateSample(&Prestate,
+                CollatedArgs.Args[sf2bbArg_Input].Values[0]);
+
 #if 0
         int SampleIndex = CreateTestSample(&Prestate);
 #endif
 
         sf_inst_params InstParams =
         {
-            .Name = "MyInstrument"
+            .Name = FilenameTruncated
         };
 
         int InstrumentIndex = CreateInst(&Prestate, InstParams);
@@ -1021,36 +1172,42 @@ int main(int argc, char **argv)
 
         sf_preset_params PresetParams =
         {
-            .Name = "KapsysPreset"
+            .Name = FilenameTruncated
         };
 
         int PresetIndex = CreatePreset(&Prestate, PresetParams);
 
-        int Divisions[] = { 2, 2, 2, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 2, 2, 2 };
-        int DivisionsStart = 24;
+        int Divisions[(1 << 7)] = {};
+        int DivisionCount = 0;
 
-        // NOTE: (KAPSY) Get the division values in frames.
+        DivisionsFromString(CollatedArgs.Args[sf2bbArg_Divisions].Values[0],
+                Divisions, &DivisionCount);
+
+        int DivisionsStart =
+            StringToInt(CollatedArgs.Args[sf2bbArg_DivisionsStart].Values[0]);
+
         int TotalDivisions = 0;
         for(int DivIndex=0;
-                DivIndex < ArrayCount(Divisions);
+                DivIndex < DivisionCount;
                 ++DivIndex)
         {
             TotalDivisions+=Divisions[DivIndex];
         }
 
-        float FrameRate = 44100.f; // TODO: (KAPSY) Take this from the sample.
+        sfSample *Sample = Prestate.Samples + SampleIndex;
+
+        float FrameRate = (float)Sample->dwSampleRate;
         float DivisionSize = 16.f; // TODO: (KAPSY) Parameterize?
-        float BeatsPerMinute = 122.f;
+        float BeatsPerMinute =
+            (float)StringToInt(CollatedArgs.Args[sf2bbArg_BPM].Values[0]);
         float MeasuresPerMinute = BeatsPerMinute/4.f;
         float SecondsPerMeasure = 1.f/(MeasuresPerMinute/60.f);
         float FramesPerDivision = (SecondsPerMeasure/DivisionSize)*FrameRate;
         float FramePos = (float)DivisionsStart*FramesPerDivision;
-
-        sfSample *Sample = Prestate.Samples + SampleIndex;
         float FrameCount = (float)(Sample->dwEnd - Sample->dwStart);
 
         for(int DivIndex=0;
-                DivIndex < ArrayCount(Divisions);
+                DivIndex < DivisionCount;
                 ++DivIndex)
         {
             float FramesThisDivision =
@@ -1078,7 +1235,7 @@ int main(int argc, char **argv)
 
         CreateTerminals(&Prestate);
 
-        FILE *OutputSF2 = fopen("testout.sf2", "wd");
+        FILE *OutputSF2 = fopen(SF2Filename, "wd");
 
         chunk RiffChunk = NewRIFFChunk();
 
@@ -1088,7 +1245,7 @@ int main(int argc, char **argv)
 
         chunk *InfoList = NewStringChunk(&RiffChunk, "LIST", "INFO");
 
-        sfVersionTag VersionTag = { 2, 1 };
+        sfVersionTag VersionTag = { 2, 4 };
         NewChunk(InfoList, "ifil",
                 sizeof(sfVersionTag), (void *)&VersionTag);
 
@@ -1118,8 +1275,10 @@ int main(int argc, char **argv)
         NewChunk(sdtaList, "smpl",
                 SampleData16Size, (void *)Prestate.SampleData16);
 
-#if 0
-        u32 SampleData24Size = Prestate.SampleDataCount;
+#if 1
+        u32 SampleData24Size =
+            Prestate.SampleDataCount + (Prestate.SampleDataCount%2);
+
         NewChunk(sdtaList, "sm24",
                 SampleData24Size, (void *)Prestate.SampleData24);
 #endif
@@ -1166,7 +1325,6 @@ int main(int argc, char **argv)
                 sizeof(sfSample)*Prestate.SampleCount,
                 (void *)Prestate.Samples);
 
-
         CalcChunkSizes(&RiffChunk);
 
         size_t BytesWritten = 0;
@@ -1179,14 +1337,14 @@ int main(int argc, char **argv)
 
         Assert(BytesWritten ==
                 (RiffChunk.ckSize + SizeOfChunkID + SizeOfChunkSize));
+
+        printf("File %s successfully created!\n", SF2Filename);
     }
     else
     {
         fprintf(stderr, "No input wave file specified!\n");
         return(EXIT_FAILURE);
     }
-
-    printf("File successfully created!\n");
 
     return(EXIT_SUCCESS);
 }

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VariablesViewState
+   version = "1.0">
+   <ContextStates>
+      <ContextState
+         contextName = "WordAlignedString(char*, int*):sf2bb.cc">
+         <PersistentStrings>
+            <PersistentString
+               value = "(void *)(0x100600018)">
+            </PersistentString>
+         </PersistentStrings>
+      </ContextState>
+      <ContextState
+         contextName = "CreateInst(sf_prestate*, sf_inst_params):sf2bb.cc">
+      </ContextState>
+      <ContextState
+         contextName = "StringLength(char*):kapsy.h">
+      </ContextState>
+      <ContextState
+         contextName = "main:sf2bb.cc">
+      </ContextState>
+      <ContextState
+         contextName = "StringCopy(char*, char*):kapsy.h">
+      </ContextState>
+      <ContextState
+         contextName = "GetFilenameOnly(char*):sf2bb.cc">
+      </ContextState>
+      <ContextState
+         contextName = "StringTruncateKeepingLast4(char*):sf2bb.cc">
+      </ContextState>
+   </ContextStates>
+</VariablesViewState>

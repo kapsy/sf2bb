@@ -11,6 +11,7 @@ enum
 {
     sf2bbArg_BPM,
     sf2bbArg_Input,
+    sf2bbArg_OutputDir,
     sf2bbArg_Divisions,
     sf2bbArg_DivisionsStart,
     sf2bbArg_MonoLeft,
@@ -22,6 +23,7 @@ char *ArgDefs[] =
 {
     "--bpm",
     "--input",
+    "--output-dir",
     "--divisions",
     "--divisions-start",
     "--monoleft",
@@ -35,6 +37,7 @@ static int ArgDefsCount;
 struct collated_arg
 {
     int Found;
+    // TODO: (KAPSY) Need to determine that these come out 0 terminated.
     char *Values[MAX_COLLATED_ARG_VALUES];
     int ValueCount;
 };
@@ -520,7 +523,6 @@ CreateTestSample(sf_prestate *Prestate)
         *SampleOut16++ = 0x0;
     }
 
-
     int IndexLeft = Prestate->SampleCount++;
     sfSample *SampleLeft = Prestate->Samples + IndexLeft;
 
@@ -594,6 +596,26 @@ GetFilenameOnly(char *Path)
         }
     }
 
+    return(Result);
+}
+
+#define ZERO_ENV_TIME -32768
+#define MAX_ENV_TIME 32767
+
+internal genAmountType
+GetEnvTimeShort(float TimeS)
+{
+    genAmountType Result = {};
+    float ResultFloat = 1200.f*log2(TimeS);
+    if(ResultFloat < (float)ZERO_ENV_TIME)
+    {
+        ResultFloat = (float)ZERO_ENV_TIME;
+    }
+    else if(ResultFloat > (float)MAX_ENV_TIME)
+    {
+        ResultFloat = (float)MAX_ENV_TIME;
+    }
+    Result.shAmount = (SHORT)RoundReal32ToInt32(ResultFloat);
     return(Result);
 }
 
@@ -839,13 +861,23 @@ CreateInstZone(sf_prestate *Prestate, sf_inst_zone_params Params)
     genAmountType SampleEndFine = { .shAmount = (SHORT)EndFine };
     CreateInstGenerator(Prestate, endAddrsOffset, SampleEndFine);
 
-    // TODO: (KAPSY) Proper conversion functions for these times.
-    // CreateInstGenerator(Prestate, delayVolEnv, -32768);
-    // CreateInstGenerator(Prestate, attackVolEnv, -32768);
-    // CreateInstGenerator(Prestate, holdVolEnv, -32768);
-    // CreateInstGenerator(Prestate, decayVolEnv, -7973);
-    // CreateInstGenerator(Prestate, sustainVolEnv, 0);
-    // CreateInstGenerator(Prestate, releaseVolEnv, -7973);
+    genAmountType DelayTime = { .shAmount = (SHORT)ZERO_ENV_TIME };
+    CreateInstGenerator(Prestate, delayVolEnv, DelayTime);
+
+    genAmountType AttackTime = GetEnvTimeShort(0.002f);
+    CreateInstGenerator(Prestate, attackVolEnv, AttackTime);
+
+    genAmountType HoldTime = { .shAmount = (SHORT)ZERO_ENV_TIME };
+    CreateInstGenerator(Prestate, holdVolEnv, HoldTime);
+
+    genAmountType DecayTime = GetEnvTimeShort(0.15f);
+    CreateInstGenerator(Prestate, decayVolEnv, DecayTime);
+
+    genAmountType SustainValue = { .shAmount = (SHORT)0 };
+    CreateInstGenerator(Prestate, sustainVolEnv, SustainValue);
+
+    genAmountType ReleaseTime = GetEnvTimeShort(0.004f);
+    CreateInstGenerator(Prestate, releaseVolEnv, ReleaseTime);
 
     genAmountType KeyRange = { .ranges = { (BYTE)Params.Key, (BYTE)Params.Key } };
     CreateInstGenerator(Prestate, keyRange, KeyRange);
@@ -1086,8 +1118,6 @@ StringToInt(char *String)
             break;
         }
         if
-
-
     }
  */
 
@@ -1235,7 +1265,20 @@ int main(int argc, char **argv)
 
         CreateTerminals(&Prestate);
 
-        FILE *OutputSF2 = fopen(SF2Filename, "wd");
+        char OutputPath[(1 << 8)] = {};
+
+        // TODO: (KAPSY) Ensure the last char of the dir is not a slash/truncate.
+        if(CollatedArgs.Args[sf2bbArg_OutputDir].ValueCount)
+        {
+            sprintf(OutputPath, "%s/%s",
+                    CollatedArgs.Args[sf2bbArg_OutputDir].Values[0], SF2Filename);
+        }
+        else
+        {
+            sprintf(OutputPath, "%s", SF2Filename);
+        }
+
+        FILE *OutputSF2 = fopen(OutputPath, "wd");
 
         chunk RiffChunk = NewRIFFChunk();
 
@@ -1274,7 +1317,6 @@ int main(int argc, char **argv)
         u32 SampleData16Size = Prestate.SampleDataCount*BytesPerWord;
         NewChunk(sdtaList, "smpl",
                 SampleData16Size, (void *)Prestate.SampleData16);
-
 #if 1
         u32 SampleData24Size =
             Prestate.SampleDataCount + (Prestate.SampleDataCount%2);
@@ -1282,7 +1324,6 @@ int main(int argc, char **argv)
         NewChunk(sdtaList, "sm24",
                 SampleData24Size, (void *)Prestate.SampleData24);
 #endif
-
         ///////////////////////////////////////////////////////////////////////
         // pdta Chunk /////////////////////////////////////////////////////////
         ///////////////////////////////////////////////////////////////////////
@@ -1338,7 +1379,7 @@ int main(int argc, char **argv)
         Assert(BytesWritten ==
                 (RiffChunk.ckSize + SizeOfChunkID + SizeOfChunkSize));
 
-        printf("File %s successfully created!\n", SF2Filename);
+        printf("File %s successfully created!\n", OutputPath);
     }
     else
     {

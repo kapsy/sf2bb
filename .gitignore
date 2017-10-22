@@ -1,5 +1,6 @@
 .DS_Store
 build
+data
 *.wav
 *.sf2
 *.SF2
